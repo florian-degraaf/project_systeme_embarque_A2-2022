@@ -1,0 +1,278 @@
+#include <ChainableLED.h>
+#include <BME280I2C.h>
+#include <DFRobot_DS1307.h>
+#include <Wire.h>
+#include <math.h>
+#include <SPI.h>
+#include <SD.h>
+
+#define nLeds 1
+#define ledPin 7
+
+#define SERIAL_BAUD 9600
+
+BME280I2C bme;
+DFRobot_DS1307 DS1307;
+
+ChainableLED leds(7, 8, nLeds);
+
+volatile int sensorValue;
+volatile float sensorRes;
+
+//volatile uint16_t setTimeBuff[7] = { 5, 1, 7, 6, 9, 9, 2021 };
+//volatile uint16_t getTimeBuff[7] = { 0 };
+//volatile char outputarr[128];
+
+File myFile;
+
+struct data {
+  String time;
+  float temperature;
+  int humidity;
+  float pressure;
+  float luminosity;
+  String gps;
+};
+
+void setup() {
+  // put your setup code here, to run once:
+  Serial.begin(SERIAL_BAUD);
+
+  while (!Serial) {}  // Wait
+
+  pinMode(ledPin, OUTPUT);
+  leds.init();
+  leds.setColorRGB(0, 0, 0, 255);
+
+  initSD();
+  initBME280();
+  initRTC();
+}
+
+void loop() {
+  // put your main code here, to run repeatedly:
+  //getLuminosity();
+  getTime();
+  getStandard();
+  delay(500);
+}
+
+void initBME280() {
+  Wire.begin();
+
+  while (!bme.begin()) {
+    Serial.println("Could not find BME280 sensor!");
+    delay(1000);
+  }
+
+  switch (bme.chipModel()) {
+    case BME280::ChipModel_BME280:
+      Serial.println("Found BME280 sensor! Success.");
+      break;
+    case BME280::ChipModel_BMP280:
+      Serial.println("Found BMP280 sensor! No Humidity available.");
+      break;
+    default:
+      Serial.println("Found UNKNOWN sensor! Error!");
+  }
+  return 0;
+}
+
+void initRTC() {
+  uint16_t setTimeBuff[7] = { 5, 1, 7, 6, 9, 9, 2021 };
+  while (!(DS1307.begin())) {
+    Serial.println("No RTC detected!");
+    delay(3000);
+  }
+  Serial.println("RTC detected!");
+  DS1307.setTypeTime(DS1307.eYR, 2000);
+  Serial.print("get type time: ");
+  Serial.println(DS1307.getTypeTime(DS1307.eYR));
+  DS1307.stop();
+  DS1307.setTime(setTimeBuff);
+  DS1307.start();
+  //DS1307.setSqwPinMode(DS1307.eSquareWave_1Hz);
+}
+
+void initSD() {
+  float var = 2.15;
+  Serial.print("Initializing SD card...");
+  if (!SD.begin(4)) {
+    Serial.println("initialization failed!");
+    while (1)
+      ;
+  }
+
+  Serial.println("initialization done.");
+  // open the file. note that only one file can be open at a time,
+  // so you have to close this one before opening another.
+  myFile = SD.open("test.txt", FILE_WRITE);
+  myFile.seek(0);
+  // if the file opened okay, write to it:
+  if (myFile) {
+    Serial.print("Writing to test.txt...");
+    myFile.println(F("Time(s/m/h/dow/d/w/y);GPS(Long & lat coordinates);Temperature(degrees C);Humidity(%);Pressure(Pa);Luminosity(Resistance)"));
+    myFile.flush();
+    // close the file:
+    myFile.close();
+    Serial.println("done.");
+  
+  } else {
+    // if the file didn't open, print an error:
+    Serial.println("error opening test.txt");
+  }
+/*
+  // re-open the file for reading:
+  myFile = SD.open("test.txt");
+
+  if (myFile) {
+    Serial.println("test.txt:");
+    // read from the file until there's nothing else in it:
+    while (myFile.available()) {
+      Serial.write(myFile.read());
+    }
+    // close the file:
+    myFile.close();
+  } else {
+    // if the file didn't open, print an error:
+    Serial.println("error opening test.txt");
+  }*/
+}
+
+float getTemperature() {
+  float temp(NAN), hum(NAN), pres(NAN);
+
+  BME280::TempUnit tempUnit(BME280::TempUnit_Celsius);
+  BME280::PresUnit presUnit(BME280::PresUnit_Pa);
+
+  bme.read(pres, temp, hum, tempUnit, presUnit);
+
+  Serial.print("Temp: ");
+  Serial.print(temp);
+  Serial.print(" degrees " + String(tempUnit == BME280::TempUnit_Celsius ? 'C' : 'F'));
+  Serial.print("\t\tHumidity: ");
+  Serial.print(hum);
+  Serial.print("% RH");
+  Serial.print("\t\tPressure: ");
+  Serial.print(pres);
+  Serial.println("Pa");
+  delay(1000);
+
+  return temp;
+}
+
+float getHumidity() {
+  float temp(NAN), hum(NAN), pres(NAN);
+
+  BME280::TempUnit tempUnit(BME280::TempUnit_Celsius);
+  BME280::PresUnit presUnit(BME280::PresUnit_Pa);
+
+  bme.read(pres, temp, hum, tempUnit, presUnit);
+
+  return hum;
+}
+
+float getPressure() {
+  float temp(NAN), hum(NAN), pres(NAN);
+
+  BME280::TempUnit tempUnit(BME280::TempUnit_Celsius);
+  BME280::PresUnit presUnit(BME280::PresUnit_Pa);
+
+  bme.read(pres, temp, hum, tempUnit, presUnit);
+  
+  return pres;
+}
+
+float getLuminosity() {
+  sensorValue = analogRead(0);
+  sensorRes = (float)(1023 - sensorValue) * 10 / sensorValue;
+
+  //Serial.print("the analog read data is : ");
+  //Serial.println(sensorValue);
+  Serial.print("Luminosity : ");
+  Serial.println(sensorRes, DEC);  //show the light intensity on the serial monitor;
+  delay(1000);
+  return sensorRes;
+}
+
+String getTime() {
+  uint16_t getTimeBuff[7] = {0};
+  DS1307.getTime(getTimeBuff);
+  //uint16_t intvar = getTimeBuff[0];
+  //Serial.print(intvar);
+  String timeStr;
+  for(int i=0;i<7;i++){
+    timeStr = timeStr+String(getTimeBuff[i])+"/";
+  }
+  Serial.println(timeStr);
+  /*char outputarr[128];
+  sprintf(outputarr, "Time: %d/%d/%d-%d %d:%d:%d\r\n",
+          getTimeBuff[6],
+          getTimeBuff[5],
+          getTimeBuff[4],
+          getTimeBuff[3],
+          getTimeBuff[2],
+          getTimeBuff[1],
+          getTimeBuff[0]);
+  Serial.print(outputarr);*/
+  //DS1307.getTime(getTimeBuff);
+  delay(1000);
+  return timeStr;
+}
+
+void getStandard() {
+  struct data m;
+
+  /*DS1307.getTime(getTimeBuff);
+  char outputarr[128];
+  sprintf(outputarr, "Time: %d/%d/%d-%d %d:%d:%d\r\n",
+          getTimeBuff[6],
+          getTimeBuff[5],
+          getTimeBuff[4],
+          getTimeBuff[3],
+          getTimeBuff[2],
+          getTimeBuff[1],
+          getTimeBuff[0]);
+  Serial.print("TEST :");
+  Serial.print(outputarr);
+  m.time = outputarr;*/
+  //m.time = "2021/9/9-6 7:3:9";
+  m.time = getTime();
+  m.temperature = getTemperature();
+  m.humidity = getHumidity();
+  m.pressure = getPressure();
+  m.luminosity = getLuminosity();
+  m.gps = "gps coords";
+  writeData(&m);
+}
+
+void writeData(struct data* m) {
+  myFile = SD.open("test.txt", FILE_WRITE);
+
+  if (myFile) {
+    myFile.print(m->time);
+    myFile.print(";");
+    myFile.print(m->gps);
+    myFile.print(";"); 
+    myFile.print(m->temperature);
+    myFile.print(";");
+    myFile.print(m->humidity);
+        myFile.print(";");
+    myFile.print(m->pressure);
+        myFile.print(";");
+    myFile.println(m->luminosity);
+    Serial.println("Succesfully wrote to SD card!");
+    /*Serial.println(m->time);
+    Serial.println(m->temperature);
+    Serial.println(m->humidity);
+    Serial.println(m->pressure);
+    Serial.println(m->luminosity);
+    Serial.println(m->gps);*/
+
+  } else {
+    Serial.println("SD card not available.");
+  }
+
+  // close the file:
+  myFile.close();
+}
